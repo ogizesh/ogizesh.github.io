@@ -1,100 +1,56 @@
 <?php
 
-# Принимаем запрос
-$data = json_decode(file_get_contents('php://input'), TRUE);
-//file_put_contents('file.txt', '$data: '.print_r($data, 1)."\n", FILE_APPEND);
+const TOKEN = '5690407966:AAELCsX_ihF7vy-Axn58RglpDiT-cQdXztc';
+const BASE_URL = 'https://api.telegram.org/bot' . TOKEN . '/';
 
+$update = json_decode(file_get_contents('php://input'));
 
-//https://api.telegram.org/bot5690407966:AAELCsX_ihF7vy-Axn58RglpDiT-cQdXztc/setwebhook?url=*ссылка на бота*
+file_put_contents(__DIR__ . '/logs.txt', print_r($update, 1), FILE_APPEND);
 
+$chat_id = $update->message->chat->id ?? '';
+$text = $update->message->text ?? '';
 
-# Обрабатываем ручной ввод или нажатие на кнопку
-$data = $data['callback_query'] ? $data['callback_query'] : $data['message'];
+if ($text == '/start') {
+    $res = send_request('sendMessage', [
+        'chat_id' => $chat_id,
+        'text' => 'Привет! Я - бот. Я могу подсказать вам, какой праздник выпадет на определенную дату. Просто введите дату в формате Д-М-ГГГГ. Например, 31-1-2020',
+    ]);
+} elseif (preg_match("#^([0-9]{1,2})-([0-9]{1,2})-([0-9]{4})$#", $text, $matches)) {
+    $holidays = json_decode(
+        file_get_contents(
+            HOLIDAY_URL . "&year={$matches[3]}&month={$matches[2]}&day={$matches[1]}",
+            false,
+            stream_context_create(['http' => ['ignore_errors' => true]])
+        )
+    );
+    if (isset($holidays->error)) {
+        $result = $holidays->error;
+    } elseif (!empty($holidays->holidays)) {
+        $result = '';
+        foreach ($holidays->holidays as $holiday) {
+            $result .= $holiday->name . PHP_EOL;
+        }
+    } else {
+        $result = 'В этот день праздников нет...';
+    }
 
-# Важные константы
-define('TOKEN', '1310530208:AAHAKEpv_W9k3rWcO9G7ZOrJVcKHGEBqo6c');
-
-# Записываем сообщение пользователя
-$message = mb_strtolower(($data['text'] ? $data['text'] : $data['data']),'utf-8');
-
-
-# Обрабатываем сообщение
-switch ($message)
-{
-    case 'текст':
-        $method = 'sendMessage';
-        $send_data = [
-            'text'   => 'Вот мой ответ'
-        ];
-        break;
-
-    case 'кнопки':
-        $method = 'sendMessage';
-        $send_data = [
-            'text'   => 'Вот мои кнопки',
-            'reply_markup' => [
-                'resize_keyboard' => true,
-                'keyboard' => [
-                    [
-                        ['text' => 'Видео'],
-                        ['text' => 'Кнопка 2'],
-                    ],
-                    [
-                        ['text' => 'Кнопка 3'],
-                        ['text' => 'Кнопка 4'],
-                    ]
-                ]
-            ]
-        ];
-        break;
-
-
-    case 'видео':
-        $method = 'sendVideo';
-        $send_data = [
-            'video'   => 'https://chastoedov.ru/video/amo.mp4',
-            'caption' => 'Вот мое видео',
-            'reply_markup' => [
-                'resize_keyboard' => true,
-                'keyboard' => [
-                    [
-                        ['text' => 'Кнопка 1'],
-                        ['text' => 'Кнопка 2'],
-                    ],
-                    [
-                        ['text' => 'Кнопка 3'],
-                        ['text' => 'Кнопка 4'],
-                    ]
-                ]
-            ]
-        ];
-        break;
-
-    default:
-        $method = 'sendMessage';
-        $send_data = [
-            'text' => 'Не понимаю о чем вы :('
-        ];
+    $res = send_request('sendMessage', [
+        'chat_id' => $chat_id,
+        'text' => $result,
+    ]);
+} else {
+    $res = send_request('sendMessage', [
+        'chat_id' => $chat_id,
+        'text' => 'Не понял...',
+    ]);
 }
 
-# Добавляем данные пользователя
-$send_data['chat_id'] = $data['chat']['id'];
-
-$res = sendTelegram($method, $send_data);
-
-function sendTelegram($method, $data, $headers = [])
+function send_request($method, $params = [])
 {
-    $curl = curl_init();
-    curl_setopt_array($curl, [
-        CURLOPT_POST => 1,
-        CURLOPT_HEADER => 0,
-        CURLOPT_RETURNTRANSFER => 1,
-        CURLOPT_URL => 'https://api.telegram.org/bot' . TOKEN . '/' . $method,
-        CURLOPT_POSTFIELDS => json_encode($data),
-        CURLOPT_HTTPHEADER => array_merge(array("Content-Type: application/json"), $headers)
-    ]);   
-    
-    $result = curl_exec($curl);
-    curl_close($curl);
-    return (json_decode($result, 1) ? json_decode($result, 1) : $result);
+    if (!empty($params)) {
+        $url = BASE_URL . $method . '?' . http_build_query($params);
+    } else {
+        $url = BASE_URL . $method;
+    }
+    return json_decode(file_get_contents($url));
 }
